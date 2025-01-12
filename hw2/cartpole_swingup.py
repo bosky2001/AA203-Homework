@@ -39,7 +39,8 @@ def linearize(f, s, u):
     """
     # WRITE YOUR CODE BELOW ###################################################
     # INSTRUCTIONS: Use JAX to compute `A` and `B` in one line.
-    raise NotImplementedError()
+    A = jax.jacrev(f)(s, u)
+    B = jax.jacrev(f, argnums=1)(s, u)
     ###########################################################################
     return A, B
 
@@ -88,6 +89,8 @@ def ilqr(f, s0, s_goal, N, Q, R, QN, eps=1e-3, max_iters=1000):
         raise ValueError("Argument `max_iters` must be at least 1.")
     n = Q.shape[0]  # state dimension
     m = R.shape[0]  # control dimension
+    print("n:", n)
+    print("m:", m)
 
     # Initialize gains `Y` and offsets `y` for the policy
     Y = np.zeros((N, m, n))
@@ -109,15 +112,73 @@ def ilqr(f, s0, s_goal, N, Q, R, QN, eps=1e-3, max_iters=1000):
         # Linearize the dynamics at each step `k` of `(s_bar, u_bar)`
         A, B = jax.vmap(linearize, in_axes=(None, 0, 0))(f, s_bar[:-1], u_bar)
         A, B = np.array(A), np.array(B)
+        # print("Shape of Ak:", A[0].shape)
+        # print("Shape of Bk:", B[0].shape)
 
         # PART (c) ############################################################
         # INSTRUCTIONS: Update `Y`, `y`, `ds`, `du`, `s_bar`, and `u_bar`.
-        raise NotImplementedError()
+
+        # backward pass to compute  Y or L, y or l
+        # initialize with terminal cost values
+        V_N = QN
+        v_N_linear = 1 * QN @ (s_bar[-1] - s_goal)
+        v_N = (s_bar[-1] - s_goal).T @ QN @ (s_bar[-1] - s_goal)
+        
+        V_k = V_N
+        v_k_linear = v_N_linear
+        v_k = v_N
+        for k in range(N-1, -1, -1):
+            c_k = 0.5*( (s_bar[k] - s_goal).T @ Q @ (s_bar[k] - s_goal) + u_bar[k].T @ R @ u_bar[k] )
+            cx_k = Q @ (s_bar[k] - s_goal)
+            cu_k = R @ (u_bar[k])
+            cxx_k = Q
+            cuu_k = R
+            cux_k = np.zeros((m, n)) # or just 0?
+            fx_k = A[k]
+            fu_k = B[k]
+
+            Q_k = c_k + v_k 
+            Qx_k = cx_k + fx_k.T @ v_k_linear
+            Qu_k = cu_k + fu_k.T @ v_k_linear
+            Qxx_k = cxx_k + fx_k.T @ V_k @ fx_k
+            Quu_k = cuu_k + fu_k.T @ V_k @ fu_k
+            Qux_k = cux_k + (fu_k.T @ V_k @ fx_k).reshape(m, n)
+
+            # print("Shape of Q_k:", Q_k.shape)
+            # print("Shape of Qx_k:", Qx_k.shape)
+            # print("Shape of Qu_k:", Qu_k.shape)
+            # print("Shape of Qxx_k:", Qxx_k.shape)
+            # print("Shape of Quu_k:", Quu_k.shape)
+            # print("Shape of Qux_k:", Qux_k.shape)
+
+            # now update Y_k, y_k
+            y[k] = -np.linalg.inv(Quu_k) @ Qu_k
+            Y[k] = -np.linalg.inv(Quu_k) @ Qux_k
+
+            # now update V_k, v_k, v_k_linear
+            V_k = Qxx_k - Y[k].T @ Quu_k @ Y[k]
+            v_k_linear = Qx_k - Y[k].T @ Quu_k @ y[k]
+            v_k = Q_k - 0.5 * y[k].T @ Quu_k @ y[k]
+
+        # forward pass to compute s_bar and u_bar
+        s = s_bar.copy()
+
+        for k in range(N):
+            ds[k] = s[k] - s_bar[k]
+            du[k] = y[k] + Y[k] @ ds[k]
+            s[k+1] = f(s[k], u_bar[k] + du[k])
+            u_bar[k] += du[k]
+
+        
         #######################################################################
 
         if np.max(np.abs(du)) < eps:
             converged = True
             break
+        
+        s_bar = s.copy()    
+        
+
     if not converged:
         raise RuntimeError("iLQR did not converge!")
     return s_bar, u_bar, Y, y
@@ -181,11 +242,11 @@ for k in range(N):
     # INSTRUCTIONS: Compute either the closed-loop or open-loop value of
     # `u[k]`, depending on the Boolean flag `closed_loop`.
     if closed_loop:
-        u[k] = 0.0
-        raise NotImplementedError()
+        u[k] = u_bar[k] + Y[k] @ (s[k] - s_bar[k]) + y[k]
+
     else:  # do open-loop control
-        u[k] = 0.0
-        raise NotImplementedError()
+        u[k] = u_bar[k]
+        
     ###########################################################################
     s[k + 1] = odeint(lambda s, t: f(s, u[k]), s[k], t[k : k + 2])[1]
 print("done! ({:.2f} s)".format(time.time() - start), flush=True)

@@ -47,7 +47,10 @@ def affinize(f, s, u):
     """
     # PART (b) ################################################################
     # INSTRUCTIONS: Use JAX to affinize `f` around `(s, u)` in two lines.
-    raise NotImplementedError()
+    # raise NotImplementedError()
+    A = jax.jacrev(f)(s, u)
+    B = jax.jacrev(f, argnums=1)(s, u)
+    c = f(s,u) - A@s - B@u
     # END PART (b) ############################################################
     return A, B, c
 
@@ -172,7 +175,21 @@ def scp_iteration(f, s0, s_goal, s_prev, u_prev, N, P, Q, R, u_max, ρ):
     # INSTRUCTIONS: Construct the convex SCP sub-problem.
     objective = 0.0
     constraints = []
-    raise NotImplementedError()
+    constraints+= [s_cvx[0] == s0]
+
+    for i in range(N):
+        objective += cvx.quad_form(s_cvx[i]-s_goal,Q) + cvx.quad_form(u_cvx[i],R)
+        constraints += [s_cvx[i+1] == A[i]@s_cvx[i] + B[i]@u_cvx[i] + c[i]]
+        constraints += [cvx.norm(s_cvx[i] - s_prev[i], 'inf') <= ρ]
+        constraints += [cvx.norm(u_cvx[i] - u_prev[i], 'inf') <= ρ]
+        constraints += [ u_cvx[i] <= u_max, -u_max <= u_cvx[i]]
+    
+    # constraints += [cvx.norm(s_cvx[N] - s_prev[N], 'inf') <= ρ]
+
+    # Terminal cost instead of terminal set constraint(more lax ig so works better)
+    objective += cvx.quad_form(s_cvx[-1] -s_goal, P)
+    # constraints.append( s_cvx[N] == s_goal)
+
     # END PART (c) ############################################################
 
     prob = cvx.Problem(cvx.Minimize(objective), constraints)

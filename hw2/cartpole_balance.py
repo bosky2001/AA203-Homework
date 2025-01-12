@@ -60,7 +60,8 @@ def reference(t: float) -> np.ndarray:
 
     # PART (d) ##################################################
     # INSTRUCTIONS: Compute the reference state for a given time
-    raise NotImplementedError()
+
+    return np.array([a*np.sin(2*np.pi*t/T), np.pi, 0, 0])
     # END PART (d) ##############################################
 
 
@@ -85,8 +86,15 @@ def ricatti_recursion(
     for i in range(max_iters):
         # PART (b) ##################################################
         # INSTRUCTIONS: Apply the Ricatti equation until convergence
-        K = NotImplemented
-        raise NotImplementedError()
+        K = -np.linalg.inv(R + B.T@P_prev@B)@B.T@P_prev@A
+        P = Q + A.T@P_prev@(A+B@K)
+        if(np.linalg.norm(P_prev-P, ord=np.inf) <= eps):
+            converged = True
+            # P_prev = P
+            break
+
+        P_prev = P
+
         # END PART (b) ##############################################
     if not converged:
         raise RuntimeError("Ricatti recursion did not converge!")
@@ -96,7 +104,7 @@ def ricatti_recursion(
 
 def simulate(
     t: np.ndarray, s_ref: np.ndarray, u_ref: np.ndarray, s0: np.ndarray, K: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+) -> 'tuple[np.ndarray, np.ndarray]':
     """Simulate the cartpole
 
     Args:
@@ -119,14 +127,27 @@ def simulate(
     # PART (c) ##################################################
     # INSTRUCTIONS: Complete the function to simulate the cartpole system
     # Hint: use the cartpole wrapper above with odeint
-    s = NotImplemented
-    u = NotImplemented
-    raise NotImplementedError()
+    
+    n_timesteps = t.shape[0]
+    s = np.zeros(shape=(n_timesteps, n))
+    u = np.zeros(shape=(n_timesteps, m))
+
+    s[0] = s0
+
+    for i in range(n_timesteps-1):
+        
+        delta_s = -s_ref[i] + s[i]
+        u[i] = u_ref + K@delta_s
+        s[i+1] = odeint(cartpole_wrapper, s[i], t[i: i+2], (u[i],))[1]
+
+    delta_s = s[-1] - s_ref[-1]
+    u[-1] = u_ref + K@delta_s
+
     # END PART (c) ##############################################
     return s, u
 
 
-def compute_lti_matrices() -> tuple[np.ndarray, np.ndarray]:
+def compute_lti_matrices() -> 'tuple[np.ndarray, np.ndarray]':
     """Compute the linearized dynamics matrices A and B of the LTI system
 
     Returns:
@@ -136,10 +157,18 @@ def compute_lti_matrices() -> tuple[np.ndarray, np.ndarray]:
     """
     # PART (a) ##################################################
     # INSTRUCTIONS: Construct the A and B matrices
-    A = NotImplemented
-    B = NotImplemented
+    A =  np.zeros(shape=(n, n))
+    B = np.zeros(shape=(n,m))
+
+    A[0, 2] = 1
+    A[1, 3] = 1
+    A[2, 1] = mp*g/mc
+    A[3, 1] = (mc + mp)*g/mc*L
+
+    B[2, 0] = 1/mc
+    B[3, 0] = 1/mc*L
     # END PART (a) ##############################################
-    return A, B
+    return 1*np.eye(n) +A*dt, B*dt
 
 
 def plot_state_and_control_history(
@@ -181,7 +210,7 @@ def main():
     A, B = compute_lti_matrices()
 
     # Part B
-    Q = np.eye(n)  # state cost matrix
+    Q = 10*np.eye(n)  # state cost matrix
     R = np.eye(m)  # control cost matrix
     K = ricatti_recursion(A, B, Q, R)
 
@@ -189,7 +218,7 @@ def main():
     t = np.arange(0.0, 30.0, 1 / 10)
     s_ref = np.array([0.0, np.pi, 0.0, 0.0]) * np.ones((t.size, 1))
     u_ref = np.array([0.0])
-    s0 = np.array([0.0, 3 * np.pi / 4, 0.0, 0.0])
+    s0 = np.array([0.0, 4 * np.pi / 4, 0.0, 0.0])
     s, u = simulate(t, s_ref, u_ref, s0, K)
     plot_state_and_control_history(s, u, t, s_ref, "cartpole_balance")
 
